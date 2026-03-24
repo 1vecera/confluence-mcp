@@ -257,16 +257,22 @@ class E2ETestRunner:
         finally:
             Path(tmp).unlink(missing_ok=True)
 
+    async def _latest_version(self, page_id: str) -> int:
+        """Always fetch the latest version number to avoid 409 Conflicts."""
+        page = await self.client.get_page(page_id, body_format="storage")
+        return page.get("version", {}).get("number", 1)
+
     async def _test_search(self):
         print("🔍 Search pages")
-        data = await self.client.search('title~"E2E-TEST"', limit=5)
+        # Search for something that definitely exists (any page in the space)
+        data = await self.client.search('type=page', limit=3)
         results = data.get("results", [])
         self._check("search returns results", len(results) >= 1)
 
     async def _test_update_page(self, page_id: str):
         print("✏️  Update page (inline content)")
         page = await self.client.get_page(page_id, body_format="storage")
-        ver = page.get("version", {}).get("number", 1)
+        ver = await self._latest_version(page_id)
         new_body = markdown_to_storage(
             "## Introduction\n\nUpdated intro.\n\n## Details\n\nUpdated details.\n\n"
             "- Updated item 1\n- Updated item 2\n\n## Status\n\nStill good.\n\n"
@@ -287,8 +293,8 @@ class E2ETestRunner:
             tmp = f.name
         try:
             md_content = Path(tmp).read_text(encoding="utf-8")
+            ver = await self._latest_version(page_id)
             page = await self.client.get_page(page_id, body_format="storage")
-            ver = page.get("version", {}).get("number", 1)
             new_body = markdown_to_storage(md_content)
             updated = await self.client.update_page(
                 page_id, title=page.get("title", ""), body=new_body,
@@ -305,9 +311,9 @@ class E2ETestRunner:
 
     async def _test_update_section(self, page_id: str):
         print("✏️  Update section (surgical)")
+        ver = await self._latest_version(page_id)
         page = await self.client.get_page(page_id, body_format="storage")
         body = page.get("body", {}).get("storage", {}).get("value", "")
-        ver = page.get("version", {}).get("number", 1)
 
         new_body = replace_section(body, "Status", "<p>Section surgically updated!</p>")
         updated = await self.client.update_page(
@@ -330,9 +336,9 @@ class E2ETestRunner:
             tmp = f.name
         try:
             md_content = Path(tmp).read_text(encoding="utf-8")
+            ver = await self._latest_version(page_id)
             page = await self.client.get_page(page_id, body_format="storage")
             body = page.get("body", {}).get("storage", {}).get("value", "")
-            ver = page.get("version", {}).get("number", 1)
 
             new_body = replace_section(body, "Status", md_content, content_format="markdown")
             updated = await self.client.update_page(
@@ -348,9 +354,9 @@ class E2ETestRunner:
 
     async def _test_append_to_section(self, page_id: str):
         print("➕ Append to section")
+        ver = await self._latest_version(page_id)
         page = await self.client.get_page(page_id, body_format="storage")
         body = page.get("body", {}).get("storage", {}).get("value", "")
-        ver = page.get("version", {}).get("number", 1)
 
         new_body = append_to_section(body, "Details", "<p>Appended E2E test item.</p>")
         updated = await self.client.update_page(
@@ -365,9 +371,9 @@ class E2ETestRunner:
 
     async def _test_find_replace(self, page_id: str):
         print("🔄 Find and replace")
+        ver = await self._latest_version(page_id)
         page = await self.client.get_page(page_id, body_format="storage")
         body = page.get("body", {}).get("storage", {}).get("value", "")
-        ver = page.get("version", {}).get("number", 1)
 
         new_body = find_and_replace(body, "Appended E2E test item", "REPLACED E2E item")
         updated = await self.client.update_page(

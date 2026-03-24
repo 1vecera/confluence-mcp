@@ -157,6 +157,7 @@ async def get_page(
     body_format: str = "markdown",
     output_file: str | None = None,
     include_images: bool = True,
+    images_dir: str | None = None,
 ) -> str:
     """Get a Confluence page by ID.
 
@@ -166,8 +167,10 @@ async def get_page(
         body_format: Return body as "markdown", "storage", or "view" (default: markdown).
         output_file: If provided, write the page body to this file path instead
                      of returning it in the response. Keeps the LLM context clean.
-        include_images: If True and output_file is set, download images to a
-                        pictures/ subdirectory and rewrite URLs to local paths.
+        include_images: If True and output_file is set, download images and
+                        rewrite URLs to local paths.
+        images_dir: Directory to save images to. Defaults to pictures/ next to
+                    the output file. Set this to control where images land.
     """
     client = _get_client(ctx)
     api_format = "storage" if body_format in ("markdown", "storage") else body_format
@@ -188,10 +191,9 @@ async def get_page(
             p = Path(output_file).expanduser()
             p.parent.mkdir(parents=True, exist_ok=True)
 
-            # Download images and rewrite URLs
             img_count = 0
             if include_images and body_format == "markdown":
-                pictures_dir = p.parent / "pictures"
+                pictures_dir = Path(images_dir).expanduser() if images_dir else p.parent / "pictures"
                 img_count = await _download_page_images(client, page_id, pictures_dir)
                 body_text = _rewrite_image_urls_to_local(body_text, page_id)
 
@@ -200,6 +202,7 @@ async def get_page(
             result["body_format"] = body_format
             if img_count:
                 result["images_downloaded"] = img_count
+                result["images_dir"] = str(pictures_dir)
         else:
             result["body"] = body_text
             result["body_format"] = body_format
@@ -214,11 +217,12 @@ async def get_page_tree(
     include_body: bool = False,
     output_dir: str | None = None,
     include_images: bool = True,
+    images_dir: str | None = None,
 ) -> str:
     """Get a page and all its descendants as a flat list.
 
     When output_dir is set, saves each page as a .md file and downloads all
-    images to a pictures/ subdirectory — same as the fetch-confluence skill.
+    images — same as the fetch-confluence skill.
 
     Args:
         page_id: The root page ID.
@@ -226,7 +230,9 @@ async def get_page_tree(
         output_dir: If provided, write each page as a separate .md file to this
                     directory. Files are named by depth and title.
         include_images: If True and output_dir is set, download all image
-                        attachments to pictures/ and rewrite URLs in markdown.
+                        attachments and rewrite URLs in markdown.
+        images_dir: Directory to save images to. Defaults to pictures/ inside
+                    output_dir. Set this to control where images land.
     """
     client = _get_client(ctx)
 
@@ -244,6 +250,8 @@ async def get_page_tree(
         out_dir.mkdir(parents=True, exist_ok=True)
 
     total_images = 0
+    pictures_dir = Path(images_dir).expanduser() if images_dir else (out_dir / "pictures" if out_dir else None)
+
     for i, entry in enumerate(all_pages):
         if include_body or out_dir:
             pg = await client.get_page(entry["id"], body_format="storage")
@@ -251,9 +259,7 @@ async def get_page_tree(
             md_body = storage_to_markdown(body_val)
 
             if out_dir:
-                # Download images for this page
-                if include_images:
-                    pictures_dir = out_dir / "pictures"
+                if include_images and pictures_dir:
                     img_count = await _download_page_images(client, entry["id"], pictures_dir)
                     md_body = _rewrite_image_urls_to_local(md_body, entry["id"])
                     total_images += img_count
@@ -271,6 +277,7 @@ async def get_page_tree(
         result["output_dir"] = str(out_dir)
         if total_images:
             result["images_downloaded"] = total_images
+            result["images_dir"] = str(pictures_dir)
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 

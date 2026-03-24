@@ -10,3 +10,4 @@ build/
 htmlcov/
 *.egg
 .DS_Store
+tmp/

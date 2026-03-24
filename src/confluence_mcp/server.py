@@ -19,7 +19,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
 
 from .client import ConfluenceClient
 from .content import (
@@ -76,7 +76,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict]:
 mcp = FastMCP("Confluence MCP", lifespan=app_lifespan)
 
 
-def _get_client(ctx) -> ConfluenceClient:
+def _get_client(ctx: Context) -> ConfluenceClient:
     client = ctx.request_context.lifespan_context.get("client")
     if client is None:
         raise RuntimeError(
@@ -93,7 +93,7 @@ def _get_client(ctx) -> ConfluenceClient:
 
 @mcp.tool()
 async def get_page(
-    ctx: Any,
+    ctx: Context,
     page_id: str,
     include_body: bool = True,
     body_format: str = "markdown",
@@ -138,7 +138,7 @@ async def get_page(
 
 @mcp.tool()
 async def get_page_tree(
-    ctx: Any,
+    ctx: Context,
     page_id: str,
     include_body: bool = False,
     output_dir: str | None = None,
@@ -189,7 +189,7 @@ async def get_page_tree(
 
 
 @mcp.tool()
-async def get_page_sections(ctx: Any, page_id: str) -> str:
+async def get_page_sections(ctx: Context, page_id: str) -> str:
     """List all sections (headings) of a page with their content.
 
     Args:
@@ -206,7 +206,7 @@ async def get_page_sections(ctx: Any, page_id: str) -> str:
 
 @mcp.tool()
 async def get_section(
-    ctx: Any,
+    ctx: Context,
     page_id: str,
     heading: str,
     body_format: str = "markdown",
@@ -244,7 +244,7 @@ async def get_section(
 
 
 @mcp.tool()
-async def search_pages(ctx: Any, query: str, limit: int = 10) -> str:
+async def search_pages(ctx: Context, query: str, limit: int = 10) -> str:
     """Search Confluence pages using CQL or simple text.
 
     Args:
@@ -271,7 +271,7 @@ async def search_pages(ctx: Any, query: str, limit: int = 10) -> str:
 
 @mcp.tool()
 async def update_page(
-    ctx: Any,
+    ctx: Context,
     page_id: str,
     body: str | None = None,
     title: str | None = None,
@@ -317,7 +317,7 @@ async def update_page(
 
 @mcp.tool()
 async def update_section(
-    ctx: Any,
+    ctx: Context,
     page_id: str,
     heading: str,
     new_content: str | None = None,
@@ -364,7 +364,7 @@ async def update_section(
 
 @mcp.tool()
 async def append_to_section(
-    ctx: Any,
+    ctx: Context,
     page_id: str,
     heading: str,
     content: str | None = None,
@@ -408,7 +408,7 @@ async def append_to_section(
 
 @mcp.tool()
 async def find_replace_in_page(
-    ctx: Any,
+    ctx: Context,
     page_id: str,
     find_text: str,
     replace_text: str,
@@ -438,7 +438,7 @@ async def find_replace_in_page(
 
 @mcp.tool()
 async def create_page(
-    ctx: Any,
+    ctx: Context,
     space_id: str,
     title: str,
     body: str | None = None,
@@ -479,7 +479,7 @@ async def create_page(
 
 
 @mcp.tool()
-async def list_attachments(ctx: Any, page_id: str) -> str:
+async def list_attachments(ctx: Context, page_id: str) -> str:
     """List all attachments on a page.
 
     Args:
@@ -496,7 +496,7 @@ async def list_attachments(ctx: Any, page_id: str) -> str:
 
 @mcp.tool()
 async def download_attachment(
-    ctx: Any,
+    ctx: Context,
     page_id: str,
     filename: str,
     output_file: str | None = None,
@@ -536,7 +536,7 @@ async def download_attachment(
 
 @mcp.tool()
 async def upload_attachment(
-    ctx: Any,
+    ctx: Context,
     page_id: str,
     filename: str | None = None,
     content_base64: str | None = None,
@@ -581,7 +581,7 @@ async def upload_attachment(
 
 @mcp.tool()
 async def upload_image_and_embed(
-    ctx: Any,
+    ctx: Context,
     page_id: str,
     filename: str | None = None,
     image_base64: str | None = None,
@@ -636,7 +636,7 @@ async def upload_image_and_embed(
 
 
 @mcp.tool()
-async def list_page_images(ctx: Any, page_id: str) -> str:
+async def list_page_images(ctx: Context, page_id: str) -> str:
     """List all image references in a page.
 
     Args:
@@ -653,7 +653,7 @@ async def list_page_images(ctx: Any, page_id: str) -> str:
 
 
 @mcp.tool()
-async def get_labels(ctx: Any, page_id: str) -> str:
+async def get_labels(ctx: Context, page_id: str) -> str:
     """Get labels on a page.
 
     Args:
@@ -665,7 +665,7 @@ async def get_labels(ctx: Any, page_id: str) -> str:
 
 
 @mcp.tool()
-async def add_label(ctx: Any, page_id: str, label: str) -> str:
+async def add_label(ctx: Context, page_id: str, label: str) -> str:
     """Add a label to a page.
 
     Args:

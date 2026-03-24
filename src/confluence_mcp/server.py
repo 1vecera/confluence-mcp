@@ -36,12 +36,70 @@ from .content import (
 
 logger = logging.getLogger("confluence-mcp")
 
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".bmp", ".ico"}
+_CONFLUENCE_IMAGE_URL_RE = re.compile(
+    r"(?:https?://[^/]+)?/wiki/download/(?:thumbnails|attachments)/(\d+)/([^?\s)]+)(?:\?[^\s)]*)?",
+)
+
 
 def _sanitize_filename(title: str) -> str:
     """Make a page title safe for use as a filename."""
     sanitized = re.sub(r'[<>:"/\\|?*]', "", title)
     sanitized = re.sub(r"\s+", "_", sanitized).strip("_.")
     return sanitized[:200] if len(sanitized) > 200 else sanitized
+
+
+def _rewrite_image_urls_to_local(content: str, page_id: str) -> str:
+    """Replace Confluence image URLs with local pictures/ paths."""
+    from urllib.parse import unquote
+
+    def _replace(match: re.Match) -> str:
+        matched_page_id = match.group(1)
+        raw_filename = match.group(2)
+        filename = unquote(raw_filename)
+        return f"pictures/{matched_page_id}_{filename}"
+
+    return _CONFLUENCE_IMAGE_URL_RE.sub(_replace, content)
+
+
+async def _download_page_images(
+    client: ConfluenceClient, page_id: str, pictures_dir: Path
+) -> int:
+    """Download all image attachments for a page to pictures_dir.
+
+    Returns count of images downloaded.
+    """
+    pictures_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        data = await client.get_attachments(page_id)
+    except Exception:
+        return 0
+
+    count = 0
+    for att in data.get("results", []):
+        filename = att.get("title", "")
+        media_type = att.get("extensions", {}).get("mediaType", "")
+        ext = Path(filename).suffix.lower()
+
+        if not (media_type.startswith("image/") or ext in IMAGE_EXTENSIONS):
+            continue
+
+        download_path = att.get("_links", {}).get("download", "")
+        if not download_path:
+            continue
+
+        if download_path.startswith("/download/"):
+            download_path = f"/wiki{download_path}"
+
+        try:
+            image_bytes = await client.download_attachment(download_path)
+            local_name = f"{page_id}_{filename}"
+            (pictures_dir / local_name).write_bytes(image_bytes)
+            count += 1
+        except Exception:
+            continue
+
+    return count
 
 
 # ------------------------------------------------------------------
@@ -98,6 +156,7 @@ async def get_page(
     include_body: bool = True,
     body_format: str = "markdown",
     output_file: str | None = None,
+    include_images: bool = True,
 ) -> str:
     """Get a Confluence page by ID.
 
@@ -107,6 +166,8 @@ async def get_page(
         body_format: Return body as "markdown", "storage", or "view" (default: markdown).
         output_file: If provided, write the page body to this file path instead
                      of returning it in the response. Keeps the LLM context clean.
+        include_images: If True and output_file is set, download images to a
+                        pictures/ subdirectory and rewrite URLs to local paths.
     """
     client = _get_client(ctx)
     api_format = "storage" if body_format in ("markdown", "storage") else body_format
@@ -126,9 +187,19 @@ async def get_page(
         if output_file:
             p = Path(output_file).expanduser()
             p.parent.mkdir(parents=True, exist_ok=True)
+
+            # Download images and rewrite URLs
+            img_count = 0
+            if include_images and body_format == "markdown":
+                pictures_dir = p.parent / "pictures"
+                img_count = await _download_page_images(client, page_id, pictures_dir)
+                body_text = _rewrite_image_urls_to_local(body_text, page_id)
+
             p.write_text(body_text, encoding="utf-8")
             result["body_written_to"] = str(p)
             result["body_format"] = body_format
+            if img_count:
+                result["images_downloaded"] = img_count
         else:
             result["body"] = body_text
             result["body_format"] = body_format
@@ -142,15 +213,20 @@ async def get_page_tree(
     page_id: str,
     include_body: bool = False,
     output_dir: str | None = None,
+    include_images: bool = True,
 ) -> str:
     """Get a page and all its descendants as a flat list.
+
+    When output_dir is set, saves each page as a .md file and downloads all
+    images to a pictures/ subdirectory — same as the fetch-confluence skill.
 
     Args:
         page_id: The root page ID.
         include_body: If True, fetch each page's body in markdown (slower).
         output_dir: If provided, write each page as a separate .md file to this
-                    directory. Files are named by depth and title. This avoids
-                    loading all page content into the LLM context.
+                    directory. Files are named by depth and title.
+        include_images: If True and output_dir is set, download all image
+                        attachments to pictures/ and rewrite URLs in markdown.
     """
     client = _get_client(ctx)
 
@@ -167,6 +243,7 @@ async def get_page_tree(
     if out_dir:
         out_dir.mkdir(parents=True, exist_ok=True)
 
+    total_images = 0
     for i, entry in enumerate(all_pages):
         if include_body or out_dir:
             pg = await client.get_page(entry["id"], body_format="storage")
@@ -174,6 +251,13 @@ async def get_page_tree(
             md_body = storage_to_markdown(body_val)
 
             if out_dir:
+                # Download images for this page
+                if include_images:
+                    pictures_dir = out_dir / "pictures"
+                    img_count = await _download_page_images(client, entry["id"], pictures_dir)
+                    md_body = _rewrite_image_urls_to_local(md_body, entry["id"])
+                    total_images += img_count
+
                 fname = f"{i:03d}_{_sanitize_filename(entry['title'])}.md"
                 fpath = out_dir / fname
                 header = f"# {entry['title']}\n\n**Page ID:** {entry['id']}  \n**Depth:** {entry['depth']}\n\n---\n\n"
@@ -185,6 +269,8 @@ async def get_page_tree(
     result: dict[str, Any] = {"root_id": page_id, "page_count": len(all_pages), "pages": all_pages}
     if out_dir:
         result["output_dir"] = str(out_dir)
+        if total_images:
+            result["images_downloaded"] = total_images
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 

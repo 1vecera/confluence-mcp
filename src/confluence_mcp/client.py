@@ -25,7 +25,11 @@ class ConfluenceClient:
         *,
         timeout: float = DEFAULT_TIMEOUT,
     ) -> None:
-        self.base_url = base_url.rstrip("/")
+        base_url = base_url.rstrip("/")
+        # All API paths include /wiki prefix, so strip it from base_url if present
+        if base_url.endswith("/wiki"):
+            base_url = base_url[:-5]
+        self.base_url = base_url
         creds = b64encode(f"{username}:{api_token}".encode()).decode()
         self._headers = {
             "Authorization": f"Basic {creds}",

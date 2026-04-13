@@ -140,6 +140,62 @@ class TestMarkdownToStorage:
         assert 'href="https://example.com"' in result
 
 
+class TestMarkdownTables:
+    def test_simple_table(self):
+        md_text = "| A | B |\n|---|---|\n| 1 | 2 |"
+        result = markdown_to_storage(md_text)
+        assert "<table>" in result
+        assert "<thead>" in result
+        assert "<th>" in result
+        assert "<td>" in result
+        assert "A" in result
+        assert "1" in result
+
+    def test_table_with_inline_formatting(self):
+        md_text = "| Name | Value |\n|---|---|\n| **bold** | `code` |"
+        result = markdown_to_storage(md_text)
+        assert "<strong>bold</strong>" in result
+        assert "<code>code</code>" in result
+
+    def test_table_no_header(self):
+        """Table rows without a separator line — all body, no thead."""
+        md_text = "| A | B |\n| 1 | 2 |"
+        result = markdown_to_storage(md_text)
+        assert "<table>" in result
+        assert "<thead>" not in result
+        assert "<td>" in result
+
+    def test_table_multiple_rows(self):
+        md_text = "| H1 | H2 | H3 |\n|---|---|---|\n| a | b | c |\n| d | e | f |"
+        result = markdown_to_storage(md_text)
+        assert result.count("<tr>") == 3  # 1 header + 2 body
+        assert result.count("<th>") == 3
+        assert result.count("<td>") == 6
+
+    def test_table_surrounded_by_text(self):
+        md_text = "Before\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\nAfter"
+        result = markdown_to_storage(md_text)
+        assert "<p>Before</p>" in result
+        assert "<table>" in result
+        assert "<p>After</p>" in result
+
+
+class TestBlockquotes:
+    def test_simple_blockquote(self):
+        result = markdown_to_storage("> This is a quote")
+        assert "ac:structured-macro" in result
+        assert "This is a quote" in result
+
+    def test_multiline_blockquote(self):
+        result = markdown_to_storage("> Line one\n> Line two")
+        assert "Line one" in result
+        assert "Line two" in result
+
+    def test_blockquote_with_formatting(self):
+        result = markdown_to_storage("> **Warning:** something important")
+        assert "<strong>Warning:</strong>" in result
+
+
 class TestStorageToMarkdown:
     def test_heading(self):
         result = storage_to_markdown("<h2>Hello</h2>")

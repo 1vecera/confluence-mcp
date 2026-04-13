@@ -41,6 +41,8 @@ def markdown_to_storage(markdown_text: str) -> str:
     code_lines: list[str] = []
     in_list: str | None = None  # "ul" or "ol"
     list_items: list[str] = []
+    table_rows: list[str] = []
+    blockquote_lines: list[str] = []
 
     def _flush_list() -> None:
         nonlocal in_list, list_items
@@ -50,6 +52,50 @@ def markdown_to_storage(markdown_text: str) -> str:
             html_parts.append(f"<{tag}>{items}</{tag}>")
         in_list = None
         list_items = []
+
+    def _flush_table() -> None:
+        nonlocal table_rows
+        if not table_rows:
+            return
+        parsed = [_parse_table_row(r) for r in table_rows]
+        # Detect separator row (all cells match --- pattern)
+        sep_idx = None
+        for i, cells in enumerate(parsed):
+            if all(re.match(r"^:?-{3,}:?$", c.strip()) for c in cells):
+                sep_idx = i
+                break
+        parts = ['<table><tbody>']
+        if sep_idx is not None and sep_idx > 0:
+            # Rows before separator are header
+            parts = ["<table><thead>"]
+            for row_cells in parsed[:sep_idx]:
+                parts.append("<tr>" + "".join(f"<th>{_inline(c.strip())}</th>" for c in row_cells) + "</tr>")
+            parts.append("</thead><tbody>")
+            body = parsed[sep_idx + 1:]
+        else:
+            body = parsed
+        for row_cells in body:
+            parts.append("<tr>" + "".join(f"<td>{_inline(c.strip())}</td>" for c in row_cells) + "</tr>")
+        parts.append("</tbody></table>")
+        html_parts.append("".join(parts))
+        table_rows = []
+
+    def _flush_blockquote() -> None:
+        nonlocal blockquote_lines
+        if not blockquote_lines:
+            return
+        inner = " ".join(blockquote_lines)
+        html_parts.append(
+            '<ac:structured-macro ac:name="info">'
+            f"<ac:rich-text-body><p>{_inline(inner)}</p></ac:rich-text-body>"
+            "</ac:structured-macro>"
+        )
+        blockquote_lines = []
+
+    def _flush_all() -> None:
+        _flush_list()
+        _flush_table()
+        _flush_blockquote()
 
     for line in lines:
         # Code block fences
@@ -67,7 +113,7 @@ def markdown_to_storage(markdown_text: str) -> str:
                 code_lines = []
                 code_lang = ""
             else:
-                _flush_list()
+                _flush_all()
                 in_code_block = True
                 code_lang = line[3:].strip()
             continue
@@ -78,10 +124,33 @@ def markdown_to_storage(markdown_text: str) -> str:
 
         stripped = line.strip()
 
-        # Empty line — flush list
+        # Empty line — flush everything
         if not stripped:
-            _flush_list()
+            _flush_all()
             continue
+
+        # Table rows: lines starting and ending with |
+        if stripped.startswith("|") and stripped.endswith("|"):
+            _flush_list()
+            _flush_blockquote()
+            table_rows.append(stripped)
+            continue
+
+        # If we were collecting table rows but this line isn't one, flush
+        if table_rows:
+            _flush_table()
+
+        # Blockquotes: lines starting with >
+        bq_match = re.match(r"^>\s?(.*)", stripped)
+        if bq_match:
+            _flush_list()
+            _flush_table()
+            blockquote_lines.append(bq_match.group(1))
+            continue
+
+        # If we were collecting blockquote lines but this isn't one, flush
+        if blockquote_lines:
+            _flush_blockquote()
 
         # Headings
         heading_match = re.match(r"^(#{1,6})\s+(.+)$", stripped)
@@ -120,8 +189,14 @@ def markdown_to_storage(markdown_text: str) -> str:
         _flush_list()
         html_parts.append(f"<p>{_inline(stripped)}</p>")
 
-    _flush_list()
+    _flush_all()
     return "\n".join(html_parts)
+
+
+def _parse_table_row(row: str) -> list[str]:
+    """Split a markdown table row into cells, stripping outer pipes."""
+    inner = row.strip("|")
+    return inner.split("|")
 
 
 def _inline(text: str) -> str:

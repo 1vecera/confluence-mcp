@@ -179,6 +179,56 @@ class TestMarkdownTables:
         assert "<table>" in result
         assert "<p>After</p>" in result
 
+    def test_table_no_outer_pipes(self):
+        """Tables without leading/trailing pipes — the CHURN page format.
+
+        Real markdown produced by upstream tools often omits outer pipes:
+            A | B | C
+            ---|---|---
+            1 | 2 | 3
+        Confluence won't render these as tables unless we detect and convert.
+        """
+        md_text = "Environment| Catalog| Purpose\n---|---|---\n**dev**| `cat-1`| Local"
+        result = markdown_to_storage(md_text)
+        assert "<table>" in result, f"Expected table tag, got: {result}"
+        assert "<thead>" in result
+        assert "<th>Environment</th>" in result
+        assert "<th>Catalog</th>" in result
+        assert "<th>Purpose</th>" in result
+        assert "<strong>dev</strong>" in result
+        assert "<code>cat-1</code>" in result
+        # Should NOT wrap rows as paragraphs
+        assert "<p>Environment| Catalog| Purpose</p>" not in result
+        assert "<p>---|---|---</p>" not in result
+
+    def test_table_no_outer_pipes_multiple_rows(self):
+        md_text = (
+            "Parameter| Value| Rationale\n"
+            "---|---|---\n"
+            "`n_estimators`| 1500| High tree count\n"
+            "`learning_rate`| 0.02| Small steps\n"
+            "`max_depth`| 6| Balances complexity"
+        )
+        result = markdown_to_storage(md_text)
+        assert result.count("<tr>") == 4  # 1 header + 3 body
+        assert result.count("<th>") == 3
+        assert result.count("<td>") == 9
+
+    def test_table_no_outer_pipes_surrounded_by_text(self):
+        md_text = (
+            "Some intro paragraph.\n\n"
+            "Col A| Col B\n"
+            "---|---\n"
+            "val 1| val 2\n\n"
+            "Trailing paragraph."
+        )
+        result = markdown_to_storage(md_text)
+        assert "<p>Some intro paragraph.</p>" in result
+        assert "<table>" in result
+        assert "<th>Col A</th>" in result
+        assert "<td>val 1</td>" in result
+        assert "<p>Trailing paragraph.</p>" in result
+
 
 class TestBlockquotes:
     def test_simple_blockquote(self):

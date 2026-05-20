@@ -35,6 +35,7 @@ def markdown_to_storage(markdown_text: str) -> str:
     use storage format directly.
     """
     lines = markdown_text.split("\n")
+    table_line_indices = _scan_table_lines(lines)
     html_parts: list[str] = []
     in_code_block = False
     code_lang = ""
@@ -97,7 +98,7 @@ def markdown_to_storage(markdown_text: str) -> str:
         _flush_table()
         _flush_blockquote()
 
-    for line in lines:
+    for line_idx, line in enumerate(lines):
         # Code block fences
         if line.startswith("```"):
             if in_code_block:
@@ -129,8 +130,8 @@ def markdown_to_storage(markdown_text: str) -> str:
             _flush_all()
             continue
 
-        # Table rows: lines starting and ending with |
-        if stripped.startswith("|") and stripped.endswith("|"):
+        # Table rows: identified by pre-scan (handles both `| a | b |` and `a| b` formats)
+        if line_idx in table_line_indices:
             _flush_list()
             _flush_blockquote()
             table_rows.append(stripped)
@@ -197,6 +198,75 @@ def _parse_table_row(row: str) -> list[str]:
     """Split a markdown table row into cells, stripping outer pipes."""
     inner = row.strip("|")
     return inner.split("|")
+
+
+def _is_separator_line(stripped: str) -> bool:
+    """Return True if line is a markdown table separator (---|---|---)."""
+    if "|" not in stripped:
+        return False
+    cells = stripped.strip("|").split("|")
+    return bool(cells) and all(re.match(r"^\s*:?-{3,}:?\s*$", c) for c in cells)
+
+
+def _scan_table_lines(lines: list[str]) -> set[int]:
+    """Pre-scan: return set of line indices that belong to a markdown table.
+
+    A line is a table row if it contains `|` and is either:
+      - a separator row (---|---|---), or
+      - adjacent (no blank line between) to a separator row, or
+      - part of a contiguous run of lines with leading AND trailing pipes
+        (legacy `| A | B |` format without a separator).
+    """
+    n = len(lines)
+    in_code = False
+    has_pipe = [False] * n
+    is_sep = [False] * n
+    is_blank = [False] * n
+    has_outer_pipes = [False] * n
+
+    for i, line in enumerate(lines):
+        if line.startswith("```"):
+            in_code = not in_code
+            continue
+        if in_code:
+            continue
+        stripped = line.strip()
+        if not stripped:
+            is_blank[i] = True
+            continue
+        has_pipe[i] = "|" in stripped
+        is_sep[i] = _is_separator_line(stripped)
+        has_outer_pipes[i] = stripped.startswith("|") and stripped.endswith("|")
+
+    table_lines: set[int] = set()
+
+    # Expand outward from each separator while neighbouring lines have pipes
+    for i, sep in enumerate(is_sep):
+        if not sep:
+            continue
+        table_lines.add(i)
+        j = i - 1
+        while j >= 0 and has_pipe[j] and not is_blank[j]:
+            table_lines.add(j)
+            j -= 1
+        j = i + 1
+        while j < n and has_pipe[j] and not is_blank[j]:
+            table_lines.add(j)
+            j += 1
+
+    # Contiguous runs of outer-pipe rows (handles header-less tables)
+    i = 0
+    while i < n:
+        if has_outer_pipes[i]:
+            j = i
+            while j < n and has_outer_pipes[j]:
+                table_lines.add(j)
+                j += 1
+            i = j
+        else:
+            i += 1
+
+    return table_lines
 
 
 def _inline(text: str) -> str:
